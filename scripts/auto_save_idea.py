@@ -52,11 +52,61 @@ def is_skill_used(content: str) -> bool:
     return count_trigger_keywords(content) >= MIN_TRIGGER_COUNT
 
 
+def clean_saved_content(content: str) -> str:
+    """清理多余的助手诊断前缀，保留核心问答文本。"""
+    lines = content.splitlines()
+    if not lines:
+        return content
+
+    if lines[0].startswith(
+        "Reviewing the relevant skill configuration before generating the response"
+    ):
+        cleaned = []
+        skip = True
+        for line in lines[1:]:
+            if skip:
+                if line.startswith("Read skill") or not line.strip():
+                    continue
+                skip = False
+            cleaned.append(line)
+        content = "\n".join(cleaned).strip()
+
+    return content.strip() or content
+
+
+def make_safe_filename(text: str, max_length: int = 40) -> str:
+    """从文本中提取问题概要，构造安全文件名。"""
+    import re
+
+    text = clean_saved_content(text)
+    text = text.strip().splitlines()[0] if text.strip() else ""
+    if not text:
+        return "skill_analysis"
+
+    # 取第一句话或第一行，去掉开头提示词
+    for prefix in ["分析：", "分析:", "问题：", "问题:", "解释：", "解释:"]:
+        if text.startswith(prefix):
+            text = text[len(prefix) :].strip()
+            break
+
+    summary = re.split(r"[。？！!?]", text, maxsplit=1)[0].strip()
+    summary = summary[:max_length]
+
+    # 只保留安全字符：中文、英数、下划线和短横线
+    summary = re.sub(r"[^\w\u4e00-\u9fff\- ]+", "", summary)
+    summary = re.sub(r"\s+", "_", summary)
+    return summary or "skill_analysis"
+
+
 def save_to_markdown(content: str, save_dir: str = SAVE_DIR) -> str:
     ensure_save_dir(save_dir)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"skill_analysis_{timestamp}.md"
-    filepath = os.path.join(save_dir, filename)
+    content = clean_saved_content(content)
+    filename = make_safe_filename(content)
+    filepath = os.path.join(save_dir, f"{filename}.md")
+
+    if os.path.exists(filepath):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filepath = os.path.join(save_dir, f"{filename}_{timestamp}.md")
 
     with open(filepath, "w", encoding="utf-8") as f:
         f.write(content)
